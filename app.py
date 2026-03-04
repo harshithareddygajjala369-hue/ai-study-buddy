@@ -103,9 +103,17 @@ if not os.path.exists(STATS_FILE):
     json.dump({
         "notes": 0,
         "flashcards": 0,
-        "voice": 0,
         "quiz": 0
     }, open(STATS_FILE, "w"))
+
+# ===============================
+# UPDATE STATS FUNCTION
+# ===============================
+
+def update_stats(key):
+    stats = json.load(open(STATS_FILE))
+    stats[key] += 1
+    json.dump(stats, open(STATS_FILE, "w"))
 
 # ===============================
 # PASSWORD VALIDATION
@@ -199,7 +207,7 @@ if not st.session_state.login:
             if st.button("Register", use_container_width=True):
 
                 if not is_valid_password(pwd):
-                    st.error("Password must be 8+ characters with 1 uppercase, 1 lowercase, 1 number, and 1 special character.")
+                    st.error("Password must be strong")
                 else:
                     users[email] = {"name": name, "pwd": pwd}
                     json.dump(users, open(USER_FILE, "w"))
@@ -240,7 +248,7 @@ else:
         })
 
         fig = px.bar(df, x="Feature", y="Usage")
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 # ===============================
 # STUDY MATERIAL
@@ -259,6 +267,7 @@ else:
                     text += extracted
 
         if st.button("Generate Notes + Flashcards"):
+
             prompt = f"""
 Create structured study notes.
 
@@ -270,7 +279,12 @@ Summary
 Key Points
 Flashcards (Q/A)
 """
-            st.write(ask_ai(prompt))
+
+            result = ask_ai(prompt)
+            st.write(result)
+
+            update_stats("notes")
+            update_stats("flashcards")
 
 # ===============================
 # QUIZ
@@ -281,7 +295,11 @@ Flashcards (Q/A)
         topic = st.text_input("Quiz Topic")
 
         if st.button("Generate Quiz"):
-            st.write(ask_ai(f"Create 5 MCQ questions about {topic}"))
+
+            result = ask_ai(f"Create 5 MCQ questions about {topic}")
+            st.write(result)
+
+            update_stats("quiz")
 
 # ===============================
 # CHAT
