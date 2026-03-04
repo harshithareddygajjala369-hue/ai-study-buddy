@@ -8,6 +8,7 @@ import speech_recognition as sr
 import pandas as pd
 import plotly.express as px
 from PyPDF2 import PdfReader
+from pydub import AudioSegment
 
 # ===============================
 # GEMINI CONFIGURATION
@@ -39,7 +40,12 @@ def get_available_model():
 
 
 MODEL_NAME = get_available_model()
-MODEL = genai.GenerativeModel(MODEL_NAME) if MODEL_NAME else None
+
+if MODEL_NAME:
+    MODEL = genai.GenerativeModel(MODEL_NAME)
+else:
+    MODEL = None
+
 
 # ===============================
 # PAGE CONFIG
@@ -252,11 +258,7 @@ Flashcards (Q/A)
             st.write(ask_ai(prompt))
 
 # ===============================
-# ✅ FIXED VOICE SECTION (NO FFMPEG, NO PYDUB)
-# ===============================
-
-    # ===============================
-# ✅ STABLE GOOGLE AUDIO VERSION
+# ✅ IMPROVED VOICE & AUDIO SECTION (STABLE)
 # ===============================
 
     if menu == "Voice & Audio":
@@ -265,59 +267,66 @@ Flashcards (Q/A)
 
         st.info("Speak clearly for at least 5 seconds.")
 
-        audio_input = st.audio_input("Record Lecture (WAV Only)")
-        uploaded_file = st.file_uploader("Or Upload WAV Audio", type=["wav"])
+        audio_input = st.audio_input("Record Lecture")
+        uploaded_file = st.file_uploader("Or Upload Audio", type=["wav", "mp3", "m4a"])
 
         audio_path = None
 
         try:
+            # 🎙 Mic recording (already WAV)
             if audio_input:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
                     f.write(audio_input.getvalue())
                     audio_path = f.name
 
+            # 📁 Uploaded audio (convert to WAV)
             elif uploaded_file:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as f:
                     f.write(uploaded_file.getvalue())
-                    audio_path = f.name
+                    temp_file = f.name
 
+                # Convert using pydub
+                sound = AudioSegment.from_file(temp_file)
+                audio_path = temp_file + ".wav"
+                sound.export(audio_path, format="wav")
+
+            # 🔍 Speech Recognition
             if audio_path:
 
                 recognizer = sr.Recognizer()
 
-                # Improve recognition sensitivity
+                # Improve accuracy
                 recognizer.energy_threshold = 300
                 recognizer.dynamic_energy_threshold = True
                 recognizer.pause_threshold = 0.8
 
                 with sr.AudioFile(audio_path) as source:
-
-                    # Adjust for background noise
                     recognizer.adjust_for_ambient_noise(source, duration=1)
-
                     audio_data = recognizer.record(source)
 
                 # Try Indian English first
                 try:
                     text = recognizer.recognize_google(audio_data, language="en-IN")
                 except:
-                    # Fallback to US English
-                    text = recognizer.recognize_google(audio_data, language="en-US")
+                    text = recognizer.recognize_google(audio_data)
 
                 st.success("Transcription Successful!")
-                st.write("📝 Transcribed Text:")
                 st.write(text)
 
-                notes = ask_ai("Create study notes from this lecture:\n" + text)
+                notes = ask_ai("Create structured study notes from this lecture:\n" + text)
                 st.write(notes)
 
+                # 📊 Update voice counter
+                stats = json.load(open(STATS_FILE))
+                stats["voice"] += 1
+                json.dump(stats, open(STATS_FILE, "w"))
+
         except sr.UnknownValueError:
-            st.error("⚠ Speech not clear. Speak louder and longer (5-10 seconds).")
+            st.error("⚠ Speech not clear. Please speak louder and longer (5-10 seconds).")
         except sr.RequestError:
             st.error("⚠ Google Speech service unavailable. Check internet connection.")
         except Exception as e:
-            st.error(f"Audio processing error: {e}")
-
+            st.error(f"Audio processing failed: {e}")
 # ===============================
 # QUIZ
 # ===============================
@@ -350,4 +359,4 @@ Flashcards (Q/A)
 
     if st.sidebar.button("Logout"):
         st.session_state.login = False
-        st.rerun()
+        st.rerun() 
