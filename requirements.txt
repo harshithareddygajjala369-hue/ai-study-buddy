@@ -1,6 +1,8 @@
 streamlit
 google-generativeai
 speechrecognition
-pandas
+pydub
 plotly
 PyPDF2
+pandas
+ffmpeg-python
