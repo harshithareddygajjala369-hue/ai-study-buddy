@@ -3,7 +3,7 @@ warnings.filterwarnings("ignore")
 
 import streamlit as st
 import google.generativeai as genai
-import os, json, re, tempfile
+import os, json, tempfile
 import speech_recognition as sr
 import pandas as pd
 import plotly.express as px
@@ -15,7 +15,35 @@ from pydub import AudioSegment
 # ===============================
 
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-MODEL = genai.GenerativeModel("gemini-1.5-flash")
+
+def get_available_model():
+    try:
+        models = genai.list_models()
+
+        supported = [
+            m.name for m in models
+            if "generateContent" in m.supported_generation_methods
+        ]
+
+        for preferred in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]:
+            for model in supported:
+                if preferred in model:
+                    return model
+
+        if supported:
+            return supported[0]
+
+        return None
+
+    except Exception as e:
+        return None
+
+MODEL_NAME = get_available_model()
+
+if MODEL_NAME:
+    MODEL = genai.GenerativeModel(MODEL_NAME)
+else:
+    MODEL = None
 
 # ===============================
 # PAGE CONFIG
@@ -24,7 +52,7 @@ MODEL = genai.GenerativeModel("gemini-1.5-flash")
 st.set_page_config(page_title="AI Study Buddy", layout="wide")
 
 # ===============================
-# PURPLE THEME
+# THEME
 # ===============================
 
 st.markdown("""
@@ -62,7 +90,7 @@ border-radius:25px !important;
 """, unsafe_allow_html=True)
 
 # ===============================
-# FILE STORAGE
+# FILES
 # ===============================
 
 USER_FILE = "users.json"
@@ -80,19 +108,24 @@ if not os.path.exists(STATS_FILE):
     }, open(STATS_FILE, "w"))
 
 # ===============================
-# GEMINI AI FUNCTION
+# AI FUNCTION
 # ===============================
 
 def ask_ai(prompt):
     try:
+        if not MODEL:
+            return "No Gemini model available."
+
         full_prompt = f"You are a helpful study assistant.\n\n{prompt}"
         response = MODEL.generate_content(full_prompt)
-        return response.text
+
+        return response.text if response.text else "No response generated."
+
     except Exception as e:
-        return str(e)
+        return f"AI Error: {str(e)}"
 
 # ===============================
-# SESSION STATE
+# SESSION
 # ===============================
 
 if "login" not in st.session_state:
@@ -102,7 +135,7 @@ if "chat" not in st.session_state:
     st.session_state.chat = []
 
 # ===============================
-# LOGIN PAGE
+# LOGIN
 # ===============================
 
 if not st.session_state.login:
@@ -225,7 +258,7 @@ Flashcards (Q/A)
             st.write(res)
 
 # ===============================
-# VOICE & AUDIO
+# VOICE
 # ===============================
 
     if menu == "Voice & Audio":
@@ -279,7 +312,6 @@ Flashcards (Q/A)
         topic = st.text_input("Quiz Topic")
 
         if st.button("Generate Quiz"):
-
             res = ask_ai(f"Create 5 MCQ questions about {topic}")
             st.write(res)
 
