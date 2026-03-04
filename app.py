@@ -3,12 +3,10 @@ warnings.filterwarnings("ignore")
 
 import streamlit as st
 import google.generativeai as genai
-import os, json, tempfile
-import speech_recognition as sr
+import os, json, re
 import pandas as pd
 import plotly.express as px
 from PyPDF2 import PdfReader
-from pydub import AudioSegment
 
 # ===============================
 # GEMINI CONFIGURATION
@@ -110,6 +108,23 @@ if not os.path.exists(STATS_FILE):
     }, open(STATS_FILE, "w"))
 
 # ===============================
+# PASSWORD VALIDATION
+# ===============================
+
+def is_valid_password(password):
+    if len(password) < 8:
+        return False
+    if not re.search(r"[A-Z]", password):
+        return False
+    if not re.search(r"[a-z]", password):
+        return False
+    if not re.search(r"[0-9]", password):
+        return False
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):
+        return False
+    return True
+
+# ===============================
 # SAFE AI FUNCTION
 # ===============================
 
@@ -183,9 +198,12 @@ if not st.session_state.login:
 
             if st.button("Register", use_container_width=True):
 
-                users[email] = {"name": name, "pwd": pwd}
-                json.dump(users, open(USER_FILE, "w"))
-                st.success("Account created")
+                if not is_valid_password(pwd):
+                    st.error("Password must be 8+ characters with 1 uppercase, 1 lowercase, 1 number, and 1 special character.")
+                else:
+                    users[email] = {"name": name, "pwd": pwd}
+                    json.dump(users, open(USER_FILE, "w"))
+                    st.success("Account created")
 
 # ===============================
 # MAIN APP
@@ -194,12 +212,10 @@ if not st.session_state.login:
 else:
 
     st.sidebar.title("Welcome " + st.session_state.name)
-    st.sidebar.write(f"Model: {MODEL_NAME if MODEL_NAME else 'None'}")
 
     menu = st.sidebar.radio("Menu", [
         "Dashboard",
         "Study Material",
-        "Voice & Audio",
         "Quiz",
         "AI Chat"
     ])
@@ -212,16 +228,15 @@ else:
 
         stats = json.load(open(STATS_FILE))
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
 
         col1.markdown(f"<div class='metric-card'><h3>Notes</h3><h2>{stats['notes']}</h2></div>", unsafe_allow_html=True)
         col2.markdown(f"<div class='metric-card'><h3>Flashcards</h3><h2>{stats['flashcards']}</h2></div>", unsafe_allow_html=True)
-        col3.markdown(f"<div class='metric-card'><h3>Voice</h3><h2>{stats['voice']}</h2></div>", unsafe_allow_html=True)
-        col4.markdown(f"<div class='metric-card'><h3>Quiz</h3><h2>{stats['quiz']}</h2></div>", unsafe_allow_html=True)
+        col3.markdown(f"<div class='metric-card'><h3>Quiz</h3><h2>{stats['quiz']}</h2></div>", unsafe_allow_html=True)
 
         df = pd.DataFrame({
-            "Feature": ["Notes", "Flashcards", "Voice", "Quiz"],
-            "Usage": [stats["notes"], stats["flashcards"], stats["voice"], stats["quiz"]]
+            "Feature": ["Notes", "Flashcards", "Quiz"],
+            "Usage": [stats["notes"], stats["flashcards"], stats["quiz"]]
         })
 
         fig = px.bar(df, x="Feature", y="Usage")
@@ -258,76 +273,6 @@ Flashcards (Q/A)
             st.write(ask_ai(prompt))
 
 # ===============================
-# ✅ IMPROVED VOICE & AUDIO SECTION (STABLE)
-# ===============================
-
-    if menu == "Voice & Audio":
-
-        st.subheader("🎤 Lecture to Notes")
-
-        st.info("Speak clearly for at least 5 seconds.")
-
-        audio_input = st.audio_input("Record Lecture")
-        uploaded_file = st.file_uploader("Or Upload Audio", type=["wav", "mp3", "m4a"])
-
-        audio_path = None
-
-        try:
-            # 🎙 Mic recording (already WAV)
-            if audio_input:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-                    f.write(audio_input.getvalue())
-                    audio_path = f.name
-
-            # 📁 Uploaded audio (convert to WAV)
-            elif uploaded_file:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(uploaded_file.name)[1]) as f:
-                    f.write(uploaded_file.getvalue())
-                    temp_file = f.name
-
-                # Convert using pydub
-                sound = AudioSegment.from_file(temp_file)
-                audio_path = temp_file + ".wav"
-                sound.export(audio_path, format="wav")
-
-            # 🔍 Speech Recognition
-            if audio_path:
-
-                recognizer = sr.Recognizer()
-
-                # Improve accuracy
-                recognizer.energy_threshold = 300
-                recognizer.dynamic_energy_threshold = True
-                recognizer.pause_threshold = 0.8
-
-                with sr.AudioFile(audio_path) as source:
-                    recognizer.adjust_for_ambient_noise(source, duration=1)
-                    audio_data = recognizer.record(source)
-
-                # Try Indian English first
-                try:
-                    text = recognizer.recognize_google(audio_data, language="en-IN")
-                except:
-                    text = recognizer.recognize_google(audio_data)
-
-                st.success("Transcription Successful!")
-                st.write(text)
-
-                notes = ask_ai("Create structured study notes from this lecture:\n" + text)
-                st.write(notes)
-
-                # 📊 Update voice counter
-                stats = json.load(open(STATS_FILE))
-                stats["voice"] += 1
-                json.dump(stats, open(STATS_FILE, "w"))
-
-        except sr.UnknownValueError:
-            st.error("⚠ Speech not clear. Please speak louder and longer (5-10 seconds).")
-        except sr.RequestError:
-            st.error("⚠ Google Speech service unavailable. Check internet connection.")
-        except Exception as e:
-            st.error(f"Audio processing failed: {e}")
-# ===============================
 # QUIZ
 # ===============================
 
@@ -359,4 +304,4 @@ Flashcards (Q/A)
 
     if st.sidebar.button("Logout"):
         st.session_state.login = False
-        st.rerun() 
+        st.rerun()
