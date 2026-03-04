@@ -18,13 +18,25 @@ genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 def get_available_model():
     try:
         models = genai.list_models()
-        for m in models:
-            if "generateContent" in m.supported_generation_methods:
-                if "flash" in m.name.lower():
-                    return m.name
+
+        supported = [
+            m.name for m in models
+            if "generateContent" in m.supported_generation_methods
+        ]
+
+        for model in supported:
+            if "flash" in model.lower():
+                return model
+
+        for model in supported:
+            if "gemini-pro" in model.lower() and "vision" not in model.lower():
+                return model
+
         return None
-    except:
+
+    except Exception:
         return None
+
 
 MODEL_NAME = get_available_model()
 MODEL = genai.GenerativeModel(MODEL_NAME) if MODEL_NAME else None
@@ -92,16 +104,17 @@ if not os.path.exists(STATS_FILE):
     }, open(STATS_FILE, "w"))
 
 # ===============================
-# AI FUNCTION
+# SAFE AI FUNCTION
 # ===============================
 
 def ask_ai(prompt):
     try:
         if not MODEL:
-            return "⚠ Gemini Flash model not available."
+            return "⚠ No free Gemini model available."
 
         full_prompt = f"You are a helpful study assistant.\n\n{prompt}"
         response = MODEL.generate_content(full_prompt)
+
         return response.text if response.text else "No response generated."
 
     except Exception as e:
@@ -120,7 +133,7 @@ if "chat" not in st.session_state:
     st.session_state.chat = []
 
 # ===============================
-# LOGIN
+# LOGIN PAGE
 # ===============================
 
 if not st.session_state.login:
@@ -143,10 +156,12 @@ if not st.session_state.login:
         tab = st.radio("Account", ["Login", "Register"], label_visibility="collapsed")
 
         if tab == "Login":
+
             email = st.text_input("Email")
             pwd = st.text_input("Password", type="password")
 
             if st.button("Login", use_container_width=True):
+
                 if email in users and users[email]["pwd"] == pwd:
                     st.session_state.login = True
                     st.session_state.name = users[email]["name"]
@@ -155,11 +170,13 @@ if not st.session_state.login:
                     st.error("Invalid login")
 
         else:
+
             name = st.text_input("Name")
             email = st.text_input("Email")
             pwd = st.text_input("Password", type="password")
 
             if st.button("Register", use_container_width=True):
+
                 users[email] = {"name": name, "pwd": pwd}
                 json.dump(users, open(USER_FILE, "w"))
                 st.success("Account created")
@@ -182,22 +199,83 @@ else:
     ])
 
 # ===============================
-# VOICE & AUDIO (FIXED PROPERLY)
+# DASHBOARD
+# ===============================
+
+    if menu == "Dashboard":
+
+        stats = json.load(open(STATS_FILE))
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.markdown(f"<div class='metric-card'><h3>Notes</h3><h2>{stats['notes']}</h2></div>", unsafe_allow_html=True)
+        col2.markdown(f"<div class='metric-card'><h3>Flashcards</h3><h2>{stats['flashcards']}</h2></div>", unsafe_allow_html=True)
+        col3.markdown(f"<div class='metric-card'><h3>Voice</h3><h2>{stats['voice']}</h2></div>", unsafe_allow_html=True)
+        col4.markdown(f"<div class='metric-card'><h3>Quiz</h3><h2>{stats['quiz']}</h2></div>", unsafe_allow_html=True)
+
+        df = pd.DataFrame({
+            "Feature": ["Notes", "Flashcards", "Voice", "Quiz"],
+            "Usage": [stats["notes"], stats["flashcards"], stats["voice"], stats["quiz"]]
+        })
+
+        fig = px.bar(df, x="Feature", y="Usage")
+        st.plotly_chart(fig, use_container_width=True)
+
+# ===============================
+# STUDY MATERIAL
+# ===============================
+
+    if menu == "Study Material":
+
+        text = st.text_area("Paste study text")
+        file = st.file_uploader("Upload PDF", type=["pdf"])
+
+        if file:
+            pdf = PdfReader(file)
+            for p in pdf.pages:
+                extracted = p.extract_text()
+                if extracted:
+                    text += extracted
+
+        if st.button("Generate Notes + Flashcards"):
+            prompt = f"""
+Create structured study notes.
+
+TEXT:
+{text}
+
+OUTPUT:
+Summary
+Key Points
+Flashcards (Q/A)
+"""
+            st.write(ask_ai(prompt))
+
+# ===============================
+# ✅ FIXED VOICE SECTION (NO FFMPEG, NO PYDUB)
 # ===============================
 
     if menu == "Voice & Audio":
 
         st.subheader("🎤 Lecture to Notes")
 
-        audio_file = st.audio_input("Record Lecture (WAV only)")
+        audio_input = st.audio_input("Record Lecture (WAV Only)")
+        uploaded_file = st.file_uploader("Or Upload WAV Audio", type=["wav"])
 
-        if audio_file:
+        audio_path = None
 
-            try:
+        try:
+            if audio_input:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-                    f.write(audio_file.getvalue())
+                    f.write(audio_input.getvalue())
                     audio_path = f.name
 
+            elif uploaded_file:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+                    f.write(uploaded_file.getvalue())
+                    audio_path = f.name
+
+            if audio_path:
                 recognizer = sr.Recognizer()
 
                 with sr.AudioFile(audio_path) as source:
@@ -211,38 +289,32 @@ else:
                 notes = ask_ai("Create study notes from this lecture:\n" + text)
                 st.write(notes)
 
-            except sr.UnknownValueError:
-                st.error("Could not understand audio.")
-            except sr.RequestError:
-                st.error("Speech Recognition API unavailable.")
-            except Exception as e:
-                st.error(f"Error: {e}")
+        except sr.UnknownValueError:
+            st.error("Could not understand the audio clearly.")
+        except sr.RequestError:
+            st.error("Speech recognition service unavailable.")
+        except Exception as e:
+            st.error(f"Audio processing failed: {e}")
 
 # ===============================
-# OTHER MENUS (UNCHANGED)
+# QUIZ
 # ===============================
-
-    if menu == "Study Material":
-        text = st.text_area("Paste study text")
-        file = st.file_uploader("Upload PDF", type=["pdf"])
-
-        if file:
-            pdf = PdfReader(file)
-            for p in pdf.pages:
-                extracted = p.extract_text()
-                if extracted:
-                    text += extracted
-
-        if st.button("Generate Notes + Flashcards"):
-            st.write(ask_ai(text))
 
     if menu == "Quiz":
+
         topic = st.text_input("Quiz Topic")
+
         if st.button("Generate Quiz"):
             st.write(ask_ai(f"Create 5 MCQ questions about {topic}"))
 
+# ===============================
+# CHAT
+# ===============================
+
     if menu == "AI Chat":
+
         msg = st.chat_input("Ask AI")
+
         if msg:
             reply = ask_ai(msg)
             st.session_state.chat.append(("user", msg))
