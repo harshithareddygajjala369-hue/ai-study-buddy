@@ -17,10 +17,6 @@ from pydub import AudioSegment
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 def get_available_model():
-    """
-    Select ONLY free-tier safe models.
-    Avoid gemini-3-pro automatically.
-    """
     try:
         models = genai.list_models()
 
@@ -29,12 +25,10 @@ def get_available_model():
             if "generateContent" in m.supported_generation_methods
         ]
 
-        # Prefer FLASH models (free tier safe)
         for model in supported:
             if "flash" in model.lower():
                 return model
 
-        # Fallback to older gemini-pro (if available)
         for model in supported:
             if "gemini-pro" in model.lower() and "vision" not in model.lower():
                 return model
@@ -122,7 +116,7 @@ if not os.path.exists(STATS_FILE):
 def ask_ai(prompt):
     try:
         if not MODEL:
-            return "⚠ No free Gemini model available. Enable billing or create a new API key."
+            return "⚠ No free Gemini model available."
 
         full_prompt = f"You are a helpful study assistant.\n\n{prompt}"
         response = MODEL.generate_content(full_prompt)
@@ -131,7 +125,7 @@ def ask_ai(prompt):
 
     except Exception as e:
         if "429" in str(e):
-            return "⚠ Free-tier quota exceeded. Please wait or enable billing."
+            return "⚠ Free-tier quota exceeded."
         return f"AI Error: {str(e)}"
 
 # ===============================
@@ -262,6 +256,52 @@ Key Points
 Flashcards (Q/A)
 """
             st.write(ask_ai(prompt))
+
+# ===============================
+# ✅ FIXED VOICE & AUDIO SECTION
+# ===============================
+
+    if menu == "Voice & Audio":
+
+        st.subheader("🎤 Lecture to Notes")
+
+        audio_input = st.audio_input("Record Lecture")
+        uploaded_file = st.file_uploader("Or Upload Audio", type=["wav","mp3","m4a"])
+
+        audio_path = None
+
+        try:
+            if audio_input:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
+                    f.write(audio_input.getvalue())
+                    audio_path = f.name
+
+            elif uploaded_file:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as f:
+                    f.write(uploaded_file.getvalue())
+                    temp_file = f.name
+
+                # Convert to WAV using pydub
+                audio = AudioSegment.from_file(temp_file)
+                audio_path = temp_file + ".wav"
+                audio.export(audio_path, format="wav")
+
+            if audio_path:
+                recognizer = sr.Recognizer()
+
+                with sr.AudioFile(audio_path) as source:
+                    audio_data = recognizer.record(source)
+
+                text = recognizer.recognize_google(audio_data)
+
+                st.success("Transcription Successful!")
+                st.write(text)
+
+                notes = ask_ai("Create study notes from this lecture:\n" + text)
+                st.write(notes)
+
+        except Exception as e:
+            st.error("Audio processing failed. Make sure ffmpeg is installed and microphone permission is enabled.")
 
 # ===============================
 # QUIZ
