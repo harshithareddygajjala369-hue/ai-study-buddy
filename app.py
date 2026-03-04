@@ -255,9 +255,15 @@ Flashcards (Q/A)
 # ✅ FIXED VOICE SECTION (NO FFMPEG, NO PYDUB)
 # ===============================
 
+    # ===============================
+# ✅ STABLE GOOGLE AUDIO VERSION
+# ===============================
+
     if menu == "Voice & Audio":
 
         st.subheader("🎤 Lecture to Notes")
+
+        st.info("Speak clearly for at least 5 seconds.")
 
         audio_input = st.audio_input("Record Lecture (WAV Only)")
         uploaded_file = st.file_uploader("Or Upload WAV Audio", type=["wav"])
@@ -276,25 +282,41 @@ Flashcards (Q/A)
                     audio_path = f.name
 
             if audio_path:
+
                 recognizer = sr.Recognizer()
 
+                # Improve recognition sensitivity
+                recognizer.energy_threshold = 300
+                recognizer.dynamic_energy_threshold = True
+                recognizer.pause_threshold = 0.8
+
                 with sr.AudioFile(audio_path) as source:
+
+                    # Adjust for background noise
+                    recognizer.adjust_for_ambient_noise(source, duration=1)
+
                     audio_data = recognizer.record(source)
 
-                text = recognizer.recognize_google(audio_data)
+                # Try Indian English first
+                try:
+                    text = recognizer.recognize_google(audio_data, language="en-IN")
+                except:
+                    # Fallback to US English
+                    text = recognizer.recognize_google(audio_data, language="en-US")
 
                 st.success("Transcription Successful!")
+                st.write("📝 Transcribed Text:")
                 st.write(text)
 
                 notes = ask_ai("Create study notes from this lecture:\n" + text)
                 st.write(notes)
 
         except sr.UnknownValueError:
-            st.error("Could not understand the audio clearly.")
+            st.error("⚠ Speech not clear. Speak louder and longer (5-10 seconds).")
         except sr.RequestError:
-            st.error("Speech recognition service unavailable.")
+            st.error("⚠ Google Speech service unavailable. Check internet connection.")
         except Exception as e:
-            st.error(f"Audio processing failed: {e}")
+            st.error(f"Audio processing error: {e}")
 
 # ===============================
 # QUIZ
