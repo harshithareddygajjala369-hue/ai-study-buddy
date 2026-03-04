@@ -17,6 +17,10 @@ from pydub import AudioSegment
 genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 def get_available_model():
+    """
+    Select ONLY free-tier safe models.
+    Avoid gemini-3-pro automatically.
+    """
     try:
         models = genai.list_models()
 
@@ -25,18 +29,21 @@ def get_available_model():
             if "generateContent" in m.supported_generation_methods
         ]
 
-        for preferred in ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]:
-            for model in supported:
-                if preferred in model:
-                    return model
+        # Prefer FLASH models (free tier safe)
+        for model in supported:
+            if "flash" in model.lower():
+                return model
 
-        if supported:
-            return supported[0]
+        # Fallback to older gemini-pro (if available)
+        for model in supported:
+            if "gemini-pro" in model.lower() and "vision" not in model.lower():
+                return model
 
         return None
 
-    except Exception as e:
+    except Exception:
         return None
+
 
 MODEL_NAME = get_available_model()
 
@@ -44,6 +51,7 @@ if MODEL_NAME:
     MODEL = genai.GenerativeModel(MODEL_NAME)
 else:
     MODEL = None
+
 
 # ===============================
 # PAGE CONFIG
@@ -108,13 +116,13 @@ if not os.path.exists(STATS_FILE):
     }, open(STATS_FILE, "w"))
 
 # ===============================
-# AI FUNCTION
+# SAFE AI FUNCTION
 # ===============================
 
 def ask_ai(prompt):
     try:
         if not MODEL:
-            return "No Gemini model available."
+            return "⚠ No free Gemini model available. Enable billing or create a new API key."
 
         full_prompt = f"You are a helpful study assistant.\n\n{prompt}"
         response = MODEL.generate_content(full_prompt)
@@ -122,10 +130,12 @@ def ask_ai(prompt):
         return response.text if response.text else "No response generated."
 
     except Exception as e:
+        if "429" in str(e):
+            return "⚠ Free-tier quota exceeded. Please wait or enable billing."
         return f"AI Error: {str(e)}"
 
 # ===============================
-# SESSION
+# SESSION STATE
 # ===============================
 
 if "login" not in st.session_state:
@@ -135,7 +145,7 @@ if "chat" not in st.session_state:
     st.session_state.chat = []
 
 # ===============================
-# LOGIN
+# LOGIN PAGE
 # ===============================
 
 if not st.session_state.login:
@@ -181,7 +191,6 @@ if not st.session_state.login:
 
                 users[email] = {"name": name, "pwd": pwd}
                 json.dump(users, open(USER_FILE, "w"))
-
                 st.success("Account created")
 
 # ===============================
@@ -191,6 +200,7 @@ if not st.session_state.login:
 else:
 
     st.sidebar.title("Welcome " + st.session_state.name)
+    st.sidebar.write(f"Model: {MODEL_NAME if MODEL_NAME else 'None'}")
 
     menu = st.sidebar.radio("Menu", [
         "Dashboard",
@@ -230,7 +240,6 @@ else:
     if menu == "Study Material":
 
         text = st.text_area("Paste study text")
-
         file = st.file_uploader("Upload PDF", type=["pdf"])
 
         if file:
@@ -241,7 +250,6 @@ else:
                     text += extracted
 
         if st.button("Generate Notes + Flashcards"):
-
             prompt = f"""
 Create structured study notes.
 
@@ -253,55 +261,7 @@ Summary
 Key Points
 Flashcards (Q/A)
 """
-
-            res = ask_ai(prompt)
-            st.write(res)
-
-# ===============================
-# VOICE
-# ===============================
-
-    if menu == "Voice & Audio":
-
-        st.subheader("🎤 Lecture to Notes")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            audio = st.audio_input("Record Lecture")
-
-        with col2:
-            file = st.file_uploader("Upload Audio", type=["wav", "mp3", "m4a"])
-
-        path = None
-
-        if audio:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-                f.write(audio.getvalue())
-                path = f.name
-
-        elif file:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-                f.write(file.getvalue())
-                path = f.name
-
-        if path:
-
-            r = sr.Recognizer()
-            audio_file = AudioSegment.from_file(path)
-            wav_path = path + ".wav"
-            audio_file.export(wav_path, format="wav")
-
-            with sr.AudioFile(wav_path) as src:
-                aud = r.record(src)
-
-            text = r.recognize_google(aud)
-
-            st.subheader("Transcribed Text")
-            st.write(text)
-
-            res = ask_ai("Create study notes from lecture:\n" + text)
-            st.write(res)
+            st.write(ask_ai(prompt))
 
 # ===============================
 # QUIZ
@@ -312,8 +272,7 @@ Flashcards (Q/A)
         topic = st.text_input("Quiz Topic")
 
         if st.button("Generate Quiz"):
-            res = ask_ai(f"Create 5 MCQ questions about {topic}")
-            st.write(res)
+            st.write(ask_ai(f"Create 5 MCQ questions about {topic}"))
 
 # ===============================
 # CHAT
@@ -329,7 +288,6 @@ Flashcards (Q/A)
             st.session_state.chat.append(("ai", reply))
 
         for role, m in st.session_state.chat:
-
             if role == "user":
                 st.markdown(f"<div class='chat-user'>{m}</div>", unsafe_allow_html=True)
             else:
